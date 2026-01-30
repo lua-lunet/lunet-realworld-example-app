@@ -1,0 +1,29 @@
+# Build artifacts
+build/
+.xmake/
+*.so
+*.dll
+*.dylib
+
+# Temporary files
+.tmp/
+*.sqlite3
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# LuaRocks
+*.rock
+lua_modules/
+
+# Environment
+.env
+.env.local
