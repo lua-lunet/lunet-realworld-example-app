@@ -1,7 +1,16 @@
 -- Database abstraction for RealWorld API
--- Uses lunet.db native driver
-local native = require("lunet.db")
+-- Dynamically loads the appropriate driver based on config
 local config = require("app.db_config")
+
+local driver_modules = {
+    sqlite = "lunet.sqlite3",
+    sqlite3 = "lunet.sqlite3",
+    mysql = "lunet.mysql",
+    postgres = "lunet.postgres",
+}
+
+local driver_name = driver_modules[config.driver] or "lunet.sqlite3"
+local native = require(driver_name)
 
 local db = {}
 

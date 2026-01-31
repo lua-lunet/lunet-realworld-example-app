@@ -11,7 +11,32 @@ local db = require("app.lib.db")
 local auth = require("app.lib.auth")
 
 db.set_config(config.db)
+-- db.init() moved to inside lunet.spawn as it requires a coroutine
 auth.set_config(config)
+
+-- Parse listen address in various formats:
+--   unix://path/to/socket
+--   tcp://host:port
+--   host:port (implicit tcp)
+local function parse_listen(addr)
+    local scheme, rest = addr:match("^(%w+)://(.+)$")
+    if scheme == "unix" then
+        return "unix", rest, nil
+    elseif scheme == "tcp" then
+        local host, port = rest:match("^(.+):(%d+)$")
+        if not host or not port then
+            error("Invalid TCP address: " .. addr)
+        end
+        return "tcp", host, tonumber(port)
+    else
+        -- no scheme, assume tcp if contains ':'
+        local host, port = addr:match("^(.+):(%d+)$")
+        if host and port then
+            return "tcp", host, tonumber(port)
+        end
+        error("Invalid listen address format (expected 'tcp://host:port' or 'unix://path'): " .. addr)
+    end
+end
 
 local handlers = {
     users = require("app.handlers.users"),
@@ -196,13 +221,19 @@ lunet.spawn(function()
         os.exit(1)
     end
 
-    local listener, err = socket.listen("tcp", config.server.host, config.server.port)
+    local protocol, host, port = parse_listen(config.server.listen)
+
+    local listener, err = socket.listen(protocol, host, port)
     if not listener then
         print("Failed to listen: " .. (err or "unknown error"))
         os.exit(1)
     end
 
-    print("Conduit API server listening on http://" .. config.server.host .. ":" .. config.server.port)
+    if protocol == "unix" then
+        print("Conduit API server listening on unix://" .. host)
+    else
+        print("Conduit API server listening on tcp://" .. host .. ":" .. port)
+    end
 
     while true do
         local client = socket.accept(listener)

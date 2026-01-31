@@ -18,15 +18,24 @@ description = {
       - Favorites
       - User following
       - Tags
+
+      Database Support:
+      By default, uses SQLite (lunet-sqlite3). For other databases:
+        luarocks install lunet-mysql    # MySQL/MariaDB
+        luarocks install lunet-postgres # PostgreSQL
+      Then set DB_DRIVER=mysql or DB_DRIVER=postgres environment variable.
    ]],
    homepage = "https://github.com/lua-lunet/lunet-realworld-example-app",
    license = "MIT"
 }
 
+-- Core dependency: lunet provides async I/O runtime
+-- Default database driver: lunet-sqlite3
+-- For MySQL/PostgreSQL, install lunet-mysql or lunet-postgres instead
 dependencies = {
    "lua >= 5.1",
    "lunet >= scm-1",
-   "lunet_sqlite >= scm-1"
+   "lunet-sqlite3 >= scm-1"
 }
 
 build = {
@@ -47,7 +56,10 @@ build = {
          ["app.handlers.comments"] = "app/handlers/comments.lua",
          ["app.handlers.profiles"] = "app/handlers/profiles.lua",
          ["app.handlers.tags"] = "app/handlers/tags.lua",
+      },
+      bin = {
+         ["test_api.sh"] = "bin/test_api.sh",
       }
    },
-   copy_directories = {"app"}
+   copy_directories = {"app", "www"}
 }
