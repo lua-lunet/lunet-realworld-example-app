@@ -1,39 +1,87 @@
 # Lunet RealWorld Example App
 
+[![CI](https://github.com/lua-lunet/lunet-realworld-example-app/actions/workflows/ci.yml/badge.svg)](https://github.com/lua-lunet/lunet-realworld-example-app/actions/workflows/ci.yml)
+
 A full-featured implementation of the [RealWorld "Conduit" API specification](https://realworld.io) using the [Lunet](https://github.com/lua-lunet/lunet) async I/O framework.
 
-This is a canonical example of how to build a production-quality web application with Lunet.
+This is a canonical example of how to build a production-quality web application with Lunet, demonstrating significant resource savings compared to Node.js or Python alternatives.
+
+## Why Lunet?
+
+| Metric | Lunet | Node.js | Python/Django |
+|--------|-------|---------|---------------|
+| Docker Image | ~180 MB | ~450 MB | ~400 MB |
+| Runtime Memory | ~8 MB | ~50 MB | ~80 MB |
+| Cold Start | <100ms | ~500ms | ~1s |
+
+Lunet provides the async I/O capabilities of Node.js with the resource efficiency of native code.
 
 ## Features
 
 - Complete RealWorld API implementation
-- User authentication with JWT
+- User authentication with JWT (Argon2 password hashing)
 - Articles, comments, favorites, tags
 - User profiles and following
 - SQLite by default, MySQL/PostgreSQL optional
 - Static file serving with SPA fallback
 - Unix socket and TCP support
 
-## Prerequisites
-
-- [Lunet](https://github.com/lua-lunet/lunet) (built with database support)
-- [libsodium](https://libsodium.org) for cryptography (`brew install libsodium` on macOS)
-- SQLite3 (or MySQL/PostgreSQL if preferred)
-
 ## Quick Start
 
+### Option 1: Download Pre-built Binary
+
 ```bash
-# 1. Clone this repository
+# Download the latest release for your platform
+curl -LO https://github.com/lua-lunet/lunet-realworld-example-app/releases/download/nightly/lunet-realworld-linux-amd64.tar.gz
+
+# Extract
+tar -xzf lunet-realworld-linux-amd64.tar.gz
+cd lunet-realworld-linux-amd64
+
+# Run (auto-initializes SQLite database)
+./run.sh
+
+# Open http://localhost:8080
+```
+
+### Option 2: Build from Source
+
+```bash
+# 1. Clone repositories
+git clone https://github.com/lua-lunet/lunet.git
 git clone https://github.com/lua-lunet/lunet-realworld-example-app.git
 cd lunet-realworld-example-app
 
-# 2. Initialize SQLite database
-sqlite3 .tmp/conduit.sqlite3 < app/schema_sqlite.sql
+# 2. Build lunet and SQLite driver
+make build
 
 # 3. Start the server
-lunet app/main.lua
+make run
 
 # 4. Open http://127.0.0.1:8080 in your browser
+```
+
+## Prerequisites
+
+For building from source:
+
+- [xmake](https://xmake.io/) build system
+- [libuv](https://libuv.org/) async I/O library
+- [LuaJIT](https://luajit.org/) (required for FFI)
+- [libsodium](https://libsodium.org/) for cryptography
+- SQLite3 (or MySQL/PostgreSQL)
+
+### macOS
+
+```bash
+brew install xmake pkg-config libuv luajit libsodium sqlite
+```
+
+### Ubuntu/Debian
+
+```bash
+sudo apt-get install pkg-config libuv1-dev luajit libluajit-5.1-dev libsodium-dev sqlite3
+# Install xmake: https://xmake.io/#/getting_started?id=installation
 ```
 
 ## Configuration
@@ -71,6 +119,8 @@ LUNET_LISTEN=unix:///tmp/conduit.sock
 ### SQLite (Default)
 
 ```bash
+make init
+# Or manually:
 mkdir -p .tmp
 sqlite3 .tmp/conduit.sqlite3 < app/schema_sqlite.sql
 ```
@@ -78,15 +128,15 @@ sqlite3 .tmp/conduit.sqlite3 < app/schema_sqlite.sql
 ### MySQL/MariaDB
 
 ```bash
-mysql -u root -p conduit < app/schema.sql
-DB_DRIVER=mysql DB_HOST=127.0.0.1 lunet app/main.lua
+mysql -u root -p conduit < app/schema_mysql.sql
+DB_DRIVER=mysql DB_HOST=127.0.0.1 make dev
 ```
 
 ### PostgreSQL
 
 ```bash
 psql -U postgres -d conduit -f app/schema.sql
-DB_DRIVER=postgres DB_HOST=127.0.0.1 lunet app/main.lua
+DB_DRIVER=postgres DB_HOST=127.0.0.1 make dev
 ```
 
 ## Project Structure
@@ -97,8 +147,7 @@ lunet-realworld-example-app/
 │   ├── main.lua           # Entry point, routing, server
 │   ├── config.lua         # Configuration
 │   ├── db_config.lua      # Database configuration
-│   ├── schema.sql         # MySQL/PostgreSQL schema
-│   ├── schema_sqlite.sql  # SQLite schema
+│   ├── schema*.sql        # Database schemas
 │   ├── handlers/          # Route handlers
 │   │   ├── users.lua      # Authentication endpoints
 │   │   ├── articles.lua   # Article CRUD
@@ -115,7 +164,13 @@ lunet-realworld-example-app/
 │   └── index.html         # SPA frontend
 ├── bin/
 │   └── test_api.sh        # API integration tests
+├── test/
+│   └── bench.sh           # Memory benchmark
+├── .github/workflows/
+│   └── ci.yml             # Matrix build CI
 ├── Makefile               # Development commands
+├── run.sh                 # Launcher script
+├── compare.sh             # Size comparison vs Node.js
 └── lunet-realworld-example-app-scm-1.rockspec
 ```
 
@@ -160,14 +215,26 @@ All endpoints follow the [RealWorld API spec](https://realworld-docs.netlify.app
 ## Development
 
 ```bash
-# Run with default settings
+# Build lunet from sibling directory
+make build
+
+# Initialize database and start server (background)
 make run
+
+# Start server in foreground (development)
+make dev
 
 # Run with MySQL
 make run-mysql
 
-# Run API tests
+# Run API tests (server must be running)
 make test
+
+# Run memory benchmark
+make bench
+
+# Quick smoke test
+make smoke
 
 # Stop server
 make stop
@@ -194,6 +261,29 @@ curl -X POST http://127.0.0.1:8080/api/users/login \
   -H "Content-Type: application/json" \
   -d '{"user":{"email":"test@example.com","password":"password"}}'
 ```
+
+## Benchmarking
+
+Compare resource usage against Node.js and Python implementations:
+
+```bash
+# Run size comparison (requires Docker)
+./compare.sh
+
+# Run memory benchmark
+./test/bench.sh
+```
+
+## Releases
+
+Pre-built binaries are available for:
+
+| Platform | Architecture | Download |
+|----------|--------------|----------|
+| Linux | amd64 | [lunet-realworld-linux-amd64.tar.gz](https://github.com/lua-lunet/lunet-realworld-example-app/releases/download/nightly/lunet-realworld-linux-amd64.tar.gz) |
+| Linux | arm64 | [lunet-realworld-linux-arm64.tar.gz](https://github.com/lua-lunet/lunet-realworld-example-app/releases/download/nightly/lunet-realworld-linux-arm64.tar.gz) |
+| macOS | arm64 | [lunet-realworld-macos.tar.gz](https://github.com/lua-lunet/lunet-realworld-example-app/releases/download/nightly/lunet-realworld-macos.tar.gz) |
+| Windows | amd64 | [lunet-realworld-windows-amd64.zip](https://github.com/lua-lunet/lunet-realworld-example-app/releases/download/nightly/lunet-realworld-windows-amd64.zip) |
 
 ## Installation via LuaRocks
 

@@ -12,12 +12,15 @@ description = {
    detailed = [[
       A full-featured implementation of the RealWorld spec (https://realworld.io)
       using the lunet async I/O runtime. Implements a Medium.com clone API with:
-      - User authentication (JWT)
-      - Articles CRUD
+      - User authentication (JWT with Argon2 password hashing)
+      - Articles CRUD with slugs and tags
       - Comments
       - Favorites
-      - User following
-      - Tags
+      - User following/profiles
+      - Tag management
+
+      This demonstrates Lunet's capabilities for building production-quality
+      web APIs with minimal resource usage compared to Node.js/Python alternatives.
 
       Database Support:
       By default, uses SQLite (lunet-sqlite3). For other databases:
@@ -26,7 +29,8 @@ description = {
       Then set DB_DRIVER=mysql or DB_DRIVER=postgres environment variable.
    ]],
    homepage = "https://github.com/lua-lunet/lunet-realworld-example-app",
-   license = "MIT"
+   license = "MIT",
+   labels = {"realworld", "api", "web", "rest", "json", "jwt", "sqlite", "mysql", "postgres"}
 }
 
 -- Core dependency: lunet provides async I/O runtime
@@ -58,8 +62,8 @@ build = {
          ["app.handlers.tags"] = "app/handlers/tags.lua",
       },
       bin = {
-         ["test_api.sh"] = "bin/test_api.sh",
+         ["conduit-test"] = "bin/test_api.sh",
       }
    },
-   copy_directories = {"app", "www"}
+   copy_directories = {"app", "www", "test"}
 }

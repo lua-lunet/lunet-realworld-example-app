@@ -1,0 +1,556 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual trigger'
+        required: false
+        default: 'Manual build'
+
+permissions:
+  contents: write
+
+env:
+  LUNET_VERSION: main
+
+jobs:
+  build-linux-amd64:
+    name: Build Linux amd64
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout lunet
+        uses: actions/checkout@v4
+        with:
+          repository: lua-lunet/lunet
+          ref: ${{ env.LUNET_VERSION }}
+          path: lunet
+
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libuv1-dev luajit libluajit-5.1-dev libsodium-dev sqlite3
+
+      - name: Configure Lunet
+        working-directory: lunet
+        run: xmake f -m release -y
+
+      - name: Build Lunet
+        working-directory: lunet
+        run: xmake build
+
+      - name: Build Lunet SQLite3
+        working-directory: lunet
+        run: xmake build lunet-sqlite3
+
+      - name: Initialize Database
+        run: |
+          mkdir -p .tmp
+          sqlite3 .tmp/conduit.sqlite3 < app/schema_sqlite.sql
+
+      - name: Test Conduit Server
+        run: |
+          LUNET_BIN=$(find lunet/build -name 'lunet-run' -type f | head -1)
+          SQLITE_SO=$(find lunet/build -name 'sqlite3.so' -type f | head -1)
+          export LUA_CPATH="$(dirname $SQLITE_SO)/?.so;;"
+          
+          timeout 10 $LUNET_BIN app/main.lua &
+          SERVER_PID=$!
+          sleep 3
+          
+          echo "Testing /api/tags endpoint..."
+          curl -sf --max-time 3 http://localhost:8080/api/tags
+          echo ""
+          
+          echo "Testing user registration..."
+          curl -sf --max-time 3 -X POST http://localhost:8080/api/users \
+            -H "Content-Type: application/json" \
+            -d '{"user":{"username":"testuser","email":"test@test.com","password":"password123"}}' | head -c 200
+          echo ""
+          
+          kill $SERVER_PID 2>/dev/null || true
+
+      - name: Package
+        run: |
+          mkdir -p dist/bin
+          mkdir -p dist/lib
+          mkdir -p dist/app
+          mkdir -p dist/www
+          mkdir -p dist/bin/scripts
+
+          LUNET_BIN=$(find lunet/build -name 'lunet-run' -type f | head -1)
+          LUNET_SO=$(find lunet/build -name 'lunet.so' -type f | head -1)
+          SQLITE_SO=$(find lunet/build -name 'sqlite3.so' -type f | head -1)
+
+          cp "$LUNET_BIN" dist/bin/lunet
+          [ -f "$LUNET_SO" ] && cp "$LUNET_SO" dist/lib/ || true
+          [ -f "$SQLITE_SO" ] && cp "$SQLITE_SO" dist/lib/ || true
+
+          cp -r app/* dist/app/
+          cp -r www/* dist/www/
+          cp -r bin/* dist/bin/scripts/
+          cp Makefile dist/
+          cp README.md dist/
+          cp lunet-realworld-example-app-scm-1.rockspec dist/
+
+          cat > dist/run.sh << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export LUA_CPATH="$SCRIPT_DIR/lib/?.so;;"
+          
+          # Initialize database if needed
+          if [ ! -f "$SCRIPT_DIR/.tmp/conduit.sqlite3" ]; then
+            mkdir -p "$SCRIPT_DIR/.tmp"
+            if command -v sqlite3 &> /dev/null; then
+              sqlite3 "$SCRIPT_DIR/.tmp/conduit.sqlite3" < "$SCRIPT_DIR/app/schema_sqlite.sql"
+            else
+              echo "Warning: sqlite3 not found, database not initialized"
+            fi
+          fi
+          
+          exec "$SCRIPT_DIR/bin/lunet" "$SCRIPT_DIR/app/main.lua" "$@"
+          EOF
+          chmod +x dist/run.sh
+
+          tar -czvf lunet-realworld-linux-amd64.tar.gz -C dist .
+
+      - name: Upload amd64 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lunet-realworld-linux-amd64
+          path: lunet-realworld-linux-amd64.tar.gz
+
+  build-linux-arm64:
+    name: Build Linux arm64
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout lunet
+        uses: actions/checkout@v4
+        with:
+          repository: lua-lunet/lunet
+          ref: ${{ env.LUNET_VERSION }}
+          path: lunet
+
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libuv1-dev luajit libluajit-5.1-dev libsodium-dev sqlite3
+
+      - name: Configure Lunet
+        working-directory: lunet
+        run: xmake f -m release -y
+
+      - name: Build Lunet
+        working-directory: lunet
+        run: xmake build
+
+      - name: Build Lunet SQLite3
+        working-directory: lunet
+        run: xmake build lunet-sqlite3
+
+      - name: Initialize Database
+        run: |
+          mkdir -p .tmp
+          sqlite3 .tmp/conduit.sqlite3 < app/schema_sqlite.sql
+
+      - name: Test Conduit Server
+        run: |
+          LUNET_BIN=$(find lunet/build -name 'lunet-run' -type f | head -1)
+          SQLITE_SO=$(find lunet/build -name 'sqlite3.so' -type f | head -1)
+          export LUA_CPATH="$(dirname $SQLITE_SO)/?.so;;"
+          
+          timeout 10 $LUNET_BIN app/main.lua &
+          SERVER_PID=$!
+          sleep 3
+          
+          echo "Testing /api/tags endpoint..."
+          curl -sf --max-time 3 http://localhost:8080/api/tags
+          echo ""
+          
+          echo "Testing user registration..."
+          curl -sf --max-time 3 -X POST http://localhost:8080/api/users \
+            -H "Content-Type: application/json" \
+            -d '{"user":{"username":"testuser","email":"test@test.com","password":"password123"}}' | head -c 200
+          echo ""
+          
+          kill $SERVER_PID 2>/dev/null || true
+
+      - name: Package arm64
+        run: |
+          mkdir -p dist/bin
+          mkdir -p dist/lib
+          mkdir -p dist/app
+          mkdir -p dist/www
+          mkdir -p dist/bin/scripts
+
+          LUNET_BIN=$(find lunet/build -name 'lunet-run' -type f | head -1)
+          LUNET_SO=$(find lunet/build -name 'lunet.so' -type f | head -1)
+          SQLITE_SO=$(find lunet/build -name 'sqlite3.so' -type f | head -1)
+
+          cp "$LUNET_BIN" dist/bin/lunet
+          [ -f "$LUNET_SO" ] && cp "$LUNET_SO" dist/lib/ || true
+          [ -f "$SQLITE_SO" ] && cp "$SQLITE_SO" dist/lib/ || true
+
+          cp -r app/* dist/app/
+          cp -r www/* dist/www/
+          cp -r bin/* dist/bin/scripts/
+          cp Makefile dist/
+          cp README.md dist/
+          cp lunet-realworld-example-app-scm-1.rockspec dist/
+
+          cat > dist/run.sh << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export LUA_CPATH="$SCRIPT_DIR/lib/?.so;;"
+          
+          # Initialize database if needed
+          if [ ! -f "$SCRIPT_DIR/.tmp/conduit.sqlite3" ]; then
+            mkdir -p "$SCRIPT_DIR/.tmp"
+            if command -v sqlite3 &> /dev/null; then
+              sqlite3 "$SCRIPT_DIR/.tmp/conduit.sqlite3" < "$SCRIPT_DIR/app/schema_sqlite.sql"
+            else
+              echo "Warning: sqlite3 not found, database not initialized"
+            fi
+          fi
+          
+          exec "$SCRIPT_DIR/bin/lunet" "$SCRIPT_DIR/app/main.lua" "$@"
+          EOF
+          chmod +x dist/run.sh
+
+          tar -czvf lunet-realworld-linux-arm64.tar.gz -C dist .
+
+      - name: Upload arm64 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lunet-realworld-linux-arm64
+          path: lunet-realworld-linux-arm64.tar.gz
+
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout lunet
+        uses: actions/checkout@v4
+        with:
+          repository: lua-lunet/lunet
+          ref: ${{ env.LUNET_VERSION }}
+          path: lunet
+
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+
+      - name: Install Dependencies
+        run: brew install pkg-config libuv luajit libsodium sqlite
+
+      - name: Configure Lunet
+        working-directory: lunet
+        run: xmake f -m release -y
+
+      - name: Build Lunet
+        working-directory: lunet
+        run: xmake build
+
+      - name: Build Lunet SQLite3
+        working-directory: lunet
+        run: xmake build lunet-sqlite3
+
+      - name: Initialize Database
+        run: |
+          mkdir -p .tmp
+          sqlite3 .tmp/conduit.sqlite3 < app/schema_sqlite.sql
+
+      - name: Test Conduit Server
+        run: |
+          LUNET_BIN=$(find lunet/build -name 'lunet-run' -type f | head -1)
+          SQLITE_SO=$(find lunet/build -name 'sqlite3.so' -type f | head -1)
+          export LUA_CPATH="$(dirname $SQLITE_SO)/?.so;;"
+          
+          timeout 10 $LUNET_BIN app/main.lua &
+          SERVER_PID=$!
+          sleep 3
+          
+          echo "Testing /api/tags endpoint..."
+          curl -sf --max-time 3 http://localhost:8080/api/tags
+          echo ""
+          
+          echo "Testing user registration..."
+          curl -sf --max-time 3 -X POST http://localhost:8080/api/users \
+            -H "Content-Type: application/json" \
+            -d '{"user":{"username":"testuser","email":"test@test.com","password":"password123"}}' | head -c 200
+          echo ""
+          
+          kill $SERVER_PID 2>/dev/null || true
+
+      - name: Package
+        run: |
+          mkdir -p dist/bin
+          mkdir -p dist/lib
+          mkdir -p dist/app
+          mkdir -p dist/www
+          mkdir -p dist/bin/scripts
+
+          LUNET_BIN=$(find lunet/build -name 'lunet-run' -type f | head -1)
+          LUNET_SO=$(find lunet/build -name 'lunet.so' -type f | head -1)
+          SQLITE_SO=$(find lunet/build -name 'sqlite3.so' -type f | head -1)
+
+          cp "$LUNET_BIN" dist/bin/lunet
+          [ -f "$LUNET_SO" ] && cp "$LUNET_SO" dist/lib/ || true
+          [ -f "$SQLITE_SO" ] && cp "$SQLITE_SO" dist/lib/ || true
+
+          cp -r app/* dist/app/
+          cp -r www/* dist/www/
+          cp -r bin/* dist/bin/scripts/
+          cp Makefile dist/
+          cp README.md dist/
+          cp lunet-realworld-example-app-scm-1.rockspec dist/
+
+          cat > dist/run.sh << 'EOF'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          export LUA_CPATH="$SCRIPT_DIR/lib/?.so;;"
+          
+          # Initialize database if needed
+          if [ ! -f "$SCRIPT_DIR/.tmp/conduit.sqlite3" ]; then
+            mkdir -p "$SCRIPT_DIR/.tmp"
+            if command -v sqlite3 &> /dev/null; then
+              sqlite3 "$SCRIPT_DIR/.tmp/conduit.sqlite3" < "$SCRIPT_DIR/app/schema_sqlite.sql"
+            else
+              echo "Warning: sqlite3 not found, database not initialized"
+            fi
+          fi
+          
+          exec "$SCRIPT_DIR/bin/lunet" "$SCRIPT_DIR/app/main.lua" "$@"
+          EOF
+          chmod +x dist/run.sh
+
+          tar -czvf lunet-realworld-macos.tar.gz -C dist .
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lunet-realworld-macos
+          path: lunet-realworld-macos.tar.gz
+
+  build-windows:
+    name: Build Windows amd64
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout lunet
+        uses: actions/checkout@v4
+        with:
+          repository: lua-lunet/lunet
+          ref: ${{ env.LUNET_VERSION }}
+          path: lunet
+
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 'f9d8eecab99cb23e4befb7ea90b2f9504d311b54'
+
+      - name: Install Dependencies
+        run: vcpkg install libuv:x64-windows luajit:x64-windows libsodium:x64-windows sqlite3:x64-windows
+
+      - name: Configure Lunet
+        working-directory: lunet
+        shell: pwsh
+        run: |
+          $env:VCPKG_ROOT = "${{ github.workspace }}/vcpkg"
+          $env:VCPKG_DEFAULT_TRIPLET = "x64-windows"
+          xmake f -m release -y
+
+      - name: Build Lunet
+        working-directory: lunet
+        run: xmake build
+
+      - name: Build Lunet SQLite3
+        working-directory: lunet
+        run: xmake build lunet-sqlite3
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/bin | Out-Null
+          New-Item -ItemType Directory -Force -Path dist/lib | Out-Null
+          New-Item -ItemType Directory -Force -Path dist/app | Out-Null
+          New-Item -ItemType Directory -Force -Path dist/www | Out-Null
+          New-Item -ItemType Directory -Force -Path dist/bin/scripts | Out-Null
+
+          $lunetBin = Get-ChildItem -Path lunet/build -Recurse -Filter "lunet-run.exe" | Select-Object -First 1
+          $lunetDll = Get-ChildItem -Path lunet/build -Recurse -Filter "lunet.dll" | Select-Object -First 1
+          $sqliteDll = Get-ChildItem -Path lunet/build -Recurse -Filter "sqlite3.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+
+          Copy-Item $lunetBin.FullName -Destination dist/bin/lunet.exe
+          if ($lunetDll) { Copy-Item $lunetDll.FullName -Destination dist/lib/ }
+          if ($sqliteDll) { Copy-Item $sqliteDll.FullName -Destination dist/lib/ }
+
+          $vcpkgBin = "${{ github.workspace }}/vcpkg/installed/x64-windows/bin"
+          if (Test-Path $vcpkgBin) {
+            Get-ChildItem "$vcpkgBin/*.dll" -ErrorAction SilentlyContinue | ForEach-Object {
+              Copy-Item $_.FullName -Destination dist/bin/ -ErrorAction SilentlyContinue
+            }
+          }
+
+          Copy-Item -Recurse app/* -Destination dist/app/
+          Copy-Item -Recurse www/* -Destination dist/www/
+          Copy-Item -Recurse bin/* -Destination dist/bin/scripts/
+          Copy-Item Makefile -Destination dist/
+          Copy-Item README.md -Destination dist/
+          Copy-Item lunet-realworld-example-app-scm-1.rockspec -Destination dist/
+
+          @"
+          @echo off
+          set SCRIPT_DIR=%~dp0
+          set LUA_CPATH=%SCRIPT_DIR%lib\?.dll;;
+          set DB_PATH=%SCRIPT_DIR%.tmp\conduit.sqlite3
+          "%SCRIPT_DIR%bin\lunet.exe" "%SCRIPT_DIR%app\main.lua" %*
+          "@ | Out-File -FilePath dist/run.bat -Encoding ascii
+
+          Push-Location dist
+          7z a ../lunet-realworld-windows-amd64.zip .
+          Pop-Location
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lunet-realworld-windows-amd64
+          path: lunet-realworld-windows-amd64.zip
+
+  nightly:
+    name: Nightly Release
+    runs-on: ubuntu-latest
+    needs: [build-linux-amd64, build-linux-arm64, build-macos, build-windows]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Delete existing nightly release
+        uses: dev-drprasad/delete-tag-and-release@v1.1
+        with:
+          tag_name: nightly
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          delete_release: true
+        continue-on-error: true
+
+      - name: Create Nightly Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: Nightly Build
+          prerelease: true
+          body: |
+            ## Nightly Build
+
+            **Commit:** ${{ github.sha }}
+
+            This is a complete RealWorld "Conduit" API implementation built with [Lunet](https://github.com/lua-lunet/lunet).
+
+            ### Binaries
+
+            | Platform | Archive |
+            |----------|---------|
+            | Linux (amd64) | `lunet-realworld-linux-amd64.tar.gz` |
+            | Linux (arm64) | `lunet-realworld-linux-arm64.tar.gz` |
+            | macOS (arm64) | `lunet-realworld-macos.tar.gz` |
+            | Windows (amd64) | `lunet-realworld-windows-amd64.zip` |
+
+            ### Quick Start
+
+            ```bash
+            # Extract
+            tar -xzf lunet-realworld-linux-amd64.tar.gz
+            cd lunet-realworld-linux-amd64
+
+            # Run (auto-initializes SQLite database)
+            ./run.sh
+
+            # Open http://localhost:8080
+            ```
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+
+  release:
+    name: Tagged Release
+    runs-on: ubuntu-latest
+    needs: [build-linux-amd64, build-linux-arm64, build-macos, build-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ steps.version.outputs.VERSION }}
+          body: |
+            ## Release ${{ steps.version.outputs.VERSION }}
+
+            This is a complete RealWorld "Conduit" API implementation built with [Lunet](https://github.com/lua-lunet/lunet).
+
+            ### Binaries
+
+            | Platform | Archive |
+            |----------|---------|
+            | Linux (amd64) | `lunet-realworld-linux-amd64.tar.gz` |
+            | Linux (arm64) | `lunet-realworld-linux-arm64.tar.gz` |
+            | macOS (arm64) | `lunet-realworld-macos.tar.gz` |
+            | Windows (amd64) | `lunet-realworld-windows-amd64.zip` |
+
+            ### Quick Start
+
+            ```bash
+            # Extract
+            tar -xzf lunet-realworld-linux-amd64.tar.gz
+            cd lunet-realworld-linux-amd64
+
+            # Run (auto-initializes SQLite database)
+            ./run.sh
+
+            # Open http://localhost:8080
+            ```
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
