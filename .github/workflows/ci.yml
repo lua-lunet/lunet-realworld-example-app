@@ -176,7 +176,8 @@ jobs:
           SQLITE_SO=$(find lunet/build -name 'sqlite3.so' -type f | head -1)
           export LUA_CPATH="$(dirname $SQLITE_SO)/?.so;;"
           
-          timeout 10 $LUNET_BIN app/main.lua &
+          # macOS uses gtimeout from coreutils
+          gtimeout 10 $LUNET_BIN app/main.lua &
           SERVER_PID=$!
           sleep 3
           
@@ -192,7 +193,7 @@ jobs:
           
           kill $SERVER_PID 2>/dev/null || true
 
-      - name: Package arm64
+      - name: Package macOS
         run: |
           mkdir -p dist/bin
           mkdir -p dist/lib
@@ -261,7 +262,7 @@ jobs:
           xmake-version: latest
 
       - name: Install Dependencies
-        run: brew install pkg-config libuv luajit libsodium sqlite
+        run: brew install pkg-config libuv luajit libsodium sqlite coreutils
 
       - name: Configure Lunet
         working-directory: lunet
