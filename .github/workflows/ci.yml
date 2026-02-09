@@ -42,6 +42,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pkg-config libuv1-dev luajit libluajit-5.1-dev libsodium-dev sqlite3
 
+      - name: Install Vendor Libraries
+        run: make install-vendor
+
       - name: Configure Lunet
         working-directory: lunet
         run: xmake f -m release -y
@@ -87,6 +90,7 @@ jobs:
           mkdir -p dist/lib
           mkdir -p dist/app
           mkdir -p dist/www
+          mkdir -p dist/assets/vendor
           mkdir -p dist/bin/scripts
 
           LUNET_BIN=$(find lunet/build -name 'lunet-run' -type f | head -1)
@@ -100,6 +104,8 @@ jobs:
           cp -r app/* dist/app/
           cp -r www/* dist/www/
           cp -r bin/* dist/bin/scripts/
+          cp -r scripts/* dist/bin/scripts/
+          cp -r assets/vendor/* dist/assets/vendor/
           cp Makefile dist/
           cp README.md dist/
           cp lunet-realworld-example-app-scm-1.rockspec dist/
@@ -153,6 +159,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pkg-config libuv1-dev luajit libluajit-5.1-dev libsodium-dev sqlite3
 
+      - name: Install Vendor Libraries
+        run: make install-vendor
+
       - name: Configure Lunet
         working-directory: lunet
         run: xmake f -m release -y
@@ -198,6 +207,7 @@ jobs:
           mkdir -p dist/lib
           mkdir -p dist/app
           mkdir -p dist/www
+          mkdir -p dist/assets/vendor
           mkdir -p dist/bin/scripts
 
           LUNET_BIN=$(find lunet/build -name 'lunet-run' -type f | head -1)
@@ -211,6 +221,8 @@ jobs:
           cp -r app/* dist/app/
           cp -r www/* dist/www/
           cp -r bin/* dist/bin/scripts/
+          cp -r scripts/* dist/bin/scripts/
+          cp -r assets/vendor/* dist/assets/vendor/
           cp Makefile dist/
           cp README.md dist/
           cp lunet-realworld-example-app-scm-1.rockspec dist/
@@ -263,6 +275,9 @@ jobs:
       - name: Install Dependencies
         run: brew install pkg-config libuv luajit libsodium sqlite coreutils
 
+      - name: Install Vendor Libraries
+        run: make install-vendor
+
       - name: Configure Lunet
         working-directory: lunet
         run: xmake f -m release -y
@@ -309,6 +324,7 @@ jobs:
           mkdir -p dist/lib
           mkdir -p dist/app
           mkdir -p dist/www
+          mkdir -p dist/assets/vendor
           mkdir -p dist/bin/scripts
 
           LUNET_BIN=$(find lunet/build -name 'lunet-run' -type f | head -1)
@@ -322,6 +338,8 @@ jobs:
           cp -r app/* dist/app/
           cp -r www/* dist/www/
           cp -r bin/* dist/bin/scripts/
+          cp -r scripts/* dist/bin/scripts/
+          cp -r assets/vendor/* dist/assets/vendor/
           cp Makefile dist/
           cp README.md dist/
           cp lunet-realworld-example-app-scm-1.rockspec dist/
@@ -370,7 +388,6 @@ jobs:
       - uses: xmake-io/github-action-setup-xmake@v1
         with:
           xmake-version: latest
-
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
@@ -378,6 +395,14 @@ jobs:
 
       - name: Install Dependencies
         run: vcpkg install libuv:x64-windows luajit:x64-windows libsodium:x64-windows sqlite3:x64-windows
+
+      - name: Install Vendor Libraries
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path assets/vendor/dist | Out-Null
+          $luajit = Get-ChildItem -Path vcpkg/installed/x64-windows -Recurse -Filter "luajit.exe" | Select-Object -First 1
+          if (-not $luajit) { throw "luajit.exe not found under vcpkg/installed/x64-windows" }
+          & $luajit.FullName scripts/install-vendor.lua --preact 10.19.3 --htm 3.1.1 --dest assets/vendor/dist --manifest assets/vendor/manifest.txt --tmp .tmp/vendor-downloads
 
       - name: Configure Lunet
         working-directory: lunet
@@ -422,6 +447,9 @@ jobs:
           Copy-Item -Recurse app/* -Destination dist/app/
           Copy-Item -Recurse www/* -Destination dist/www/
           Copy-Item -Recurse bin/* -Destination dist/bin/scripts/
+          Copy-Item -Recurse scripts/* -Destination dist/bin/scripts/
+          New-Item -ItemType Directory -Force -Path dist/assets/vendor | Out-Null
+          Copy-Item -Recurse assets/vendor/* -Destination dist/assets/vendor/
           Copy-Item Makefile -Destination dist/
           Copy-Item README.md -Destination dist/
           Copy-Item lunet-realworld-example-app-scm-1.rockspec -Destination dist/

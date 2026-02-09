@@ -178,6 +178,31 @@ else
 	fail "GET /api/articles/nonexistent" "Expected 404, got $STATUS"
 fi
 
+# --- Vendor caching tests ---
+log "Testing vendor library caching..."
+
+# Test vendor preact file availability
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://localhost:8080/vendor/dist/preact-0151058e.min.js")
+check_response "Vendor preact file accessible" "200" "$STATUS" ""
+
+# Test cache headers for vendor files
+LOG=".tmp/vendor_test_headers_$$.$(date +%s).log"
+curl -sD - --max-time 3 -o /dev/null "http://localhost:8080/vendor/dist/preact-0151058e.min.js" >"$LOG"
+
+if grep -q "Cache-Control: public, immutable" "$LOG"; then
+	pass "Cache-Control header present"
+else
+	fail "Cache-Control header missing" "$(cat "$LOG")"
+fi
+
+if grep -q "max-age=31536000" "$LOG"; then
+	pass "max-age set to 1 year"
+else
+	fail "max-age not set to 1 year" "$(cat "$LOG")"
+fi
+
+rm -f "$LOG"
+
 # Summary
 echo ""
 echo "==================================="

@@ -11,6 +11,11 @@ LUNET_BIN := $(LUNET_DIR)/build/lunet
 DB_PATH ?= .tmp/conduit.sqlite3
 PID_FILE ?= .tmp/server.pid
 
+# Vendor library versions
+PREACT_VERSION ?= 10.19.3
+HTM_VERSION ?= 3.1.1
+VENDOR_DIR ?= assets/vendor
+
 # Default timeout for commands (seconds)
 TIMEOUT := 10
 
@@ -26,8 +31,20 @@ $(LUNET_BIN):
 	@echo "Building lunet..."
 	cd $(LUNET_DIR) && xmake f -m release -y && xmake build && xmake build lunet-sqlite3
 
-build: $(LUNET_BIN)
+build: $(LUNET_BIN) install-vendor
 	@echo "Build complete. Lunet binary: $(LUNET_BIN)"
+
+# Install vendor libraries (downloads and hashes them)
+.PHONY: install-vendor
+install-vendor:
+	@mkdir -p $(VENDOR_DIR)/dist
+	@echo "Installing vendor libraries..."
+	@luajit scripts/install-vendor.lua \
+		--preact $(PREACT_VERSION) \
+		--htm $(HTM_VERSION) \
+		--dest $(VENDOR_DIR)/dist \
+		--manifest $(VENDOR_DIR)/manifest.txt
+	@echo "Vendor libraries installed"
 
 # Initialize SQLite database
 init:
@@ -161,6 +178,7 @@ help:
 	@echo ""
 	@echo "Usage:"
 	@echo "  make build        - Build the lunet runtime from sibling directory"
+	@echo "  make install-vendor - Install vendor libraries (cached, content-addressed)"
 	@echo "  make init         - Initialize SQLite database"
 	@echo "  make run          - Start server (port 8080, background)"
 	@echo "  make dev          - Start server in foreground (development)"

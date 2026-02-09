@@ -126,6 +126,17 @@ local function get_mime_type(path)
     return "application/octet-stream"
 end
 
+local function should_add_cache_headers(path)
+    return path:find("^/vendor/")
+end
+
+local function get_cache_headers()
+    return {
+        ["Cache-Control"] = "public, immutable, max-age=31536000",
+        ["Expires"] = os.date("!%a, %d %b %Y %H:%M:%S GMT", os.time() + 31536000)
+    }
+end
+
 local function handle_request(request)
     if request.method == "OPTIONS" then
         return http.options_response()
@@ -136,8 +147,14 @@ local function handle_request(request)
     local handler, params = match_route(request.method, request.path)
     if not handler then
         -- Static file / SPA fallback
-        if request.method == "GET" then
+        if request.method == "GET" or request.method == "HEAD" then
             local file_path = "www" .. request.path
+
+            -- For vendor files, look in assets directory
+            if request.path:find("^/vendor/") then
+                file_path = "assets" .. request.path
+            end
+
             if request.path == "/" then
                 file_path = "www/index.html"
             end
@@ -148,17 +165,32 @@ local function handle_request(request)
             end
 
             local content = read_file(file_path)
-            if not content and not request.path:find("^/api/") then
+            if not content and (not request.path:find("^/api/")) and (not request.path:find("^/vendor/")) then
                  -- SPA fallback for non-API routes
                  content = read_file("www/index.html")
                  file_path = "www/index.html"
             end
 
             if content then
-                return http.response(200, {
+                local headers = {
                     ["Content-Type"] = get_mime_type(file_path),
                     ["Connection"] = "close"
-                }, content)
+                }
+
+                -- Add cache headers for vendor files
+                if should_add_cache_headers(request.path) then
+                    local cache_headers = get_cache_headers()
+                    for k, v in pairs(cache_headers) do
+                        headers[k] = v
+                    end
+                end
+
+                if request.method == "HEAD" then
+                    headers["Content-Length"] = tostring(#content)
+                    return http.response(200, headers, "")
+                end
+
+                return http.response(200, headers, content)
             end
         end
         return http.error_response(404, {body = {"Not found"}})
