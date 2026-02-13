@@ -92,7 +92,7 @@ local function sha256_bytes(msg)
     end
 
     local function to_hex(x)
-        return string.format("%08x", x)
+        return bit.tohex(x, 8)
     end
 
     return (to_hex(H0) .. to_hex(H1) .. to_hex(H2) .. to_hex(H3) .. to_hex(H4) .. to_hex(H5) .. to_hex(H6) .. to_hex(H7))
@@ -122,7 +122,8 @@ local function ensure_dir(path)
 end
 
 local function download_file(url, dest_path, timeout_seconds)
-    local cmd = string.format("curl -fsSL --max-time %d -o '%s' '%s'", timeout_seconds or 30, dest_path, url)
+    local quote = is_windows() and '"' or "'"
+    local cmd = string.format("curl -fsSL --max-time %d -o %s%s%s %s%s%s", timeout_seconds or 30, quote, dest_path, quote, quote, url, quote)
     local handle = io.popen(cmd .. " 2>&1")
     local output = handle:read("*a")
     local success = handle:close()
