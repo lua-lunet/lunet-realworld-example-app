@@ -17,7 +17,7 @@ permissions:
   contents: write
 
 env:
-  LUNET_VERSION: main
+  LUNET_VERSION: v0.1.2
 
 jobs:
   build-linux-amd64:
