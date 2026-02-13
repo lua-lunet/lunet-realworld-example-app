@@ -104,13 +104,7 @@ function db.query(sql, ...)
 
     local result, query_err
     if select("#", ...) > 0 then
-        -- Postgres and MySQL query_params don't support parameters yet, so interpolate manually
-        if config.driver == "postgres" or config.driver == "mysql" then
-            local interpolated = db.interpolate(sql, ...)
-            result, query_err = db.query_raw(conn, interpolated)
-        else
-            result, query_err = db.query_params(conn, sql, ...)
-        end
+        result, query_err = db.query_params(conn, sql, ...)
     else
         result, query_err = db.query_raw(conn, sql)
     end
@@ -132,13 +126,7 @@ function db.exec(sql, ...)
 
     local result, exec_err
     if select("#", ...) > 0 then
-        -- Postgres and MySQL exec_params don't support parameters yet, so interpolate manually
-        if config.driver == "postgres" or config.driver == "mysql" then
-            local interpolated = db.interpolate(sql, ...)
-            result, exec_err = db.exec_raw(conn, interpolated)
-        else
-            result, exec_err = db.exec_params(conn, sql, ...)
-        end
+        result, exec_err = db.exec_params(conn, sql, ...)
     else
         result, exec_err = db.exec_raw(conn, sql)
     end
