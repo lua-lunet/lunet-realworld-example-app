@@ -1,0 +1,4 @@
+PREACT_FILE=preact-0151058e.min.js
+HOOKS_FILE=preact-hooks-269644b2.umd.js
+HTM_FILE=htm-7a31776e.umd.js
+TAILWIND_FILE=tailwind-176e8946.js
