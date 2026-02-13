@@ -5,6 +5,9 @@ build/
 *.dll
 *.dylib
 
+# Lunet dependency (cloned at build time)
+lunet/
+
 # Temporary files
 .tmp/
 *.sqlite3

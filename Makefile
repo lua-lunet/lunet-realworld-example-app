@@ -2,10 +2,12 @@
 # =======================================
 #
 # A complete RealWorld "Conduit" API implementation using the Lunet framework.
-# Assumes lunet is a sibling directory (../lunet)
+# Lunet is cloned at build time per https://github.com/lua-lunet/lunet/blob/main/docs/XMAKE_INTEGRATION.md
 
-LUNET_DIR := ../lunet
-LUNET_BIN := $(LUNET_DIR)/build/lunet
+LUNET_DIR := lunet
+LUNET_VERSION := v0.1.2
+LUNET_REPO := https://github.com/lua-lunet/lunet.git
+LUNET_BIN := $(LUNET_DIR)/build/macosx/arm64/release/lunet-run
 
 # Database configuration
 DB_PATH ?= .tmp/conduit.sqlite3
@@ -52,13 +54,21 @@ install-vendor:
 	@echo "Vendor libs installed. Manifest: www/vendor/manifest.txt"
 	@cat www/vendor/manifest.txt
 
-# Build lunet if needed
+# Build lunet if needed (clones at LUNET_VERSION if not present)
 $(LUNET_BIN):
-	@echo "Building lunet..."
-	cd $(LUNET_DIR) && xmake f -m release -y && xmake build && xmake build lunet-sqlite3
+	@echo "Building lunet v$(LUNET_VERSION)..."
+	@if [ ! -d "$(LUNET_DIR)" ]; then \
+		echo "Cloning lunet $(LUNET_VERSION)..."; \
+		git clone --branch $(LUNET_VERSION) --depth 1 $(LUNET_REPO) $(LUNET_DIR); \
+	fi
+	@cd $(LUNET_DIR) && \
+		xmake f -m release --lunet_trace=n --lunet_verbose_trace=n -y && \
+		xmake build && \
+		xmake build lunet-sqlite3
 
 build: $(LUNET_BIN)
 	@echo "Build complete. Lunet binary: $(LUNET_BIN)"
+	@echo "SQLite driver: $$(find $(LUNET_DIR)/build -name 'sqlite3.so' -type f | head -1)"
 
 # Initialize SQLite database
 init:
@@ -76,7 +86,8 @@ define setup_env
 	SQLITE_SO=$$(find $(LUNET_DIR)/build -name 'sqlite3.so' -type f 2>/dev/null | head -1); \
 	if [ -n "$$SQLITE_SO" ]; then \
 		export LUA_CPATH="$$(dirname $$SQLITE_SO)/?.so;;"; \
-	fi
+	fi; \
+	export LUA_PATH="$(LUNET_DIR)/src/?.lua;;"
 endef
 
 # Run the server (SQLite default, background)
@@ -181,6 +192,8 @@ clean:
 clean-all: clean
 	@echo "Cleaning all build artifacts..."
 	cd $(LUNET_DIR) && xmake clean 2>/dev/null || true
+	@echo "Removing cloned lunet directory..."
+	rm -rf $(LUNET_DIR)
 	@echo "Cleaned all build artifacts"
 
 # Show help
@@ -191,7 +204,7 @@ help:
 	@echo "A complete RealWorld \"Conduit\" API implementation using Lunet."
 	@echo ""
 	@echo "Usage:"
-	@echo "  make build        - Build the lunet runtime from sibling directory"
+	@echo "  make build        - Build lunet v$(LUNET_VERSION) (clones if needed)"
 	@echo "  make init         - Initialize SQLite database"
 	@echo "  make run          - Start server (port 8080, background)"
 	@echo "  make dev          - Start server in foreground (development)"
@@ -219,7 +232,6 @@ help:
 	@echo "  JWT_SECRET      - JWT signing secret (change in production!)"
 	@echo ""
 	@echo "Quick Start:"
-	@echo "  1. Clone lunet as sibling: git clone https://github.com/lua-lunet/lunet ../lunet"
-	@echo "  2. make build"
-	@echo "  3. make run"
-	@echo "  4. Open http://localhost:8080/"
+	@echo "  1. make build (clones lunet v$(LUNET_VERSION) automatically)"
+	@echo "  2. make run"
+	@echo "  3. Open http://localhost:8080/"
