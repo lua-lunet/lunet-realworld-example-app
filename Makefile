@@ -17,9 +17,40 @@ TIMEOUT := 10
 # Detect timeout command (GNU coreutils vs BSD)
 TIMEOUT_CMD := $(shell command -v gtimeout 2>/dev/null || command -v timeout 2>/dev/null || echo "")
 
-.PHONY: all build run run-debug run-mysql run-postgres stop test bench clean clean-all help init dev
+.PHONY: all build run run-debug run-mysql run-postgres stop test bench clean clean-all help init dev install-vendor
 
 all: help
+
+# Vendor lib versions (content-addressed for cache busting)
+PREACT_URL := https://unpkg.com/preact@10.19.3/dist/preact.min.js
+HOOKS_URL := https://unpkg.com/preact@10.19.3/hooks/dist/hooks.umd.js
+HTM_URL := https://unpkg.com/htm@3.1.1/dist/htm.umd.js
+TAILWIND_URL := https://cdn.tailwindcss.com
+
+# Install vendor libs with content-addressed filenames (SHA256 first 8 chars)
+# Run: make install-vendor
+# Updates www/vendor/dist/ and www/vendor/manifest.txt
+install-vendor:
+	@mkdir -p www/vendor/dist
+	@echo "Downloading vendor libraries..."
+	@curl -sL -o /tmp/preact.min.js "$(PREACT_URL)" && \
+		PREACT_SHA=$$(sha256sum /tmp/preact.min.js | cut -c1-8) && \
+		mv /tmp/preact.min.js www/vendor/dist/preact-$$PREACT_SHA.min.js && \
+		echo "PREACT_FILE=preact-$$PREACT_SHA.min.js" > www/vendor/manifest.txt
+	@curl -sL -o /tmp/hooks.umd.js "$(HOOKS_URL)" && \
+		HOOKS_SHA=$$(sha256sum /tmp/hooks.umd.js | cut -c1-8) && \
+		mv /tmp/hooks.umd.js www/vendor/dist/preact-hooks-$$HOOKS_SHA.umd.js && \
+		echo "HOOKS_FILE=preact-hooks-$$HOOKS_SHA.umd.js" >> www/vendor/manifest.txt
+	@curl -sL -o /tmp/htm.umd.js "$(HTM_URL)" && \
+		HTM_SHA=$$(sha256sum /tmp/htm.umd.js | cut -c1-8) && \
+		mv /tmp/htm.umd.js www/vendor/dist/htm-$$HTM_SHA.umd.js && \
+		echo "HTM_FILE=htm-$$HTM_SHA.umd.js" >> www/vendor/manifest.txt
+	@curl -sL -o /tmp/tailwind.js "$(TAILWIND_URL)" && \
+		TAILWIND_SHA=$$(sha256sum /tmp/tailwind.js | cut -c1-8) && \
+		mv /tmp/tailwind.js www/vendor/dist/tailwind-$$TAILWIND_SHA.js && \
+		echo "TAILWIND_FILE=tailwind-$$TAILWIND_SHA.js" >> www/vendor/manifest.txt
+	@echo "Vendor libs installed. Manifest: www/vendor/manifest.txt"
+	@cat www/vendor/manifest.txt
 
 # Build lunet if needed
 $(LUNET_BIN):
@@ -172,6 +203,7 @@ help:
 	@echo "  make smoke        - Quick smoke test"
 	@echo "  make bench        - Run memory benchmark"
 	@echo "  make stress       - Run stress test (50 requests)"
+	@echo "  make install-vendor - Download vendor libs (preact, htm, tailwind) with content-addressed filenames"
 	@echo "  make clean        - Clean temporary files"
 	@echo "  make clean-all    - Clean all including lunet build"
 	@echo ""

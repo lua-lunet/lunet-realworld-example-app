@@ -155,10 +155,15 @@ local function handle_request(request)
             end
 
             if content then
-                return http.response(200, {
+                local headers = {
                     ["Content-Type"] = get_mime_type(file_path),
                     ["Connection"] = "close"
-                }, content)
+                }
+                -- Immutable cache for vendor libs (content-addressed filenames)
+                if request.path:find("^/vendor/") then
+                    headers["Cache-Control"] = "public, max-age=31536000, immutable"
+                end
+                return http.response(200, headers, content)
             end
         end
         return http.error_response(404, {body = {"Not found"}})
