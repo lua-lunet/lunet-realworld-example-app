@@ -20,6 +20,60 @@ env:
   LUNET_VERSION: v0.1.2
 
 jobs:
+  smoke-tests:
+    name: Smoke Tests (PR)
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout lunet
+        uses: actions/checkout@v4
+        with:
+          repository: lua-lunet/lunet
+          ref: ${{ env.LUNET_VERSION }}
+          path: lunet
+
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libuv1-dev luajit libluajit-5.1-dev libsodium-dev sqlite3
+
+      - name: Configure Lunet
+        working-directory: lunet
+        run: xmake f -m release -y
+
+      - name: Build Lunet
+        working-directory: lunet
+        run: xmake build
+
+      - name: Build Lunet SQLite3
+        working-directory: lunet
+        run: xmake build lunet-sqlite3
+
+      - name: Initialize Database
+        run: |
+          mkdir -p .tmp
+          sqlite3 .tmp/conduit.sqlite3 < app/schema_sqlite.sql
+
+      - name: Run Smoke Tests
+        run: |
+          LUNET_BIN=$(find lunet/build -name 'lunet-run' -type f | head -1)
+          SQLITE_SO=$(find lunet/build -name 'sqlite3.so' -type f | head -1)
+          export LUA_CPATH="$(dirname $SQLITE_SO)/?.so;;"
+
+          $LUNET_BIN app/main.lua &
+          SERVER_PID=$!
+          sleep 3
+
+          API_URL=http://127.0.0.1:8080/api ./bin/test_api.sh
+
+          kill $SERVER_PID 2>/dev/null || true
+
   build-linux-amd64:
     name: Build Linux amd64
     runs-on: ubuntu-24.04
