@@ -19,7 +19,7 @@ TIMEOUT := 10
 # Detect timeout command (GNU coreutils vs BSD)
 TIMEOUT_CMD := $(shell command -v gtimeout 2>/dev/null || command -v timeout 2>/dev/null || echo "")
 
-.PHONY: all build run run-debug run-mysql run-postgres stop test bench clean clean-all help init dev install-vendor
+.PHONY: all build build-dist run run-debug run-mysql run-postgres stop test test-dist bench clean clean-all help init dev install-vendor
 
 all: help
 
@@ -69,6 +69,31 @@ $(LUNET_BIN):
 build: $(LUNET_BIN)
 	@echo "Build complete. Lunet binary: $(LUNET_BIN)"
 	@echo "SQLite driver: $$(find $(LUNET_DIR)/build -name 'sqlite3.so' -type f | head -1)"
+
+# Build distribution binary with embedded scripts (for production/Docker)
+build-dist:
+	@echo "Building lunet v$(LUNET_VERSION) with embedded scripts..."
+	@if [ ! -d "$(LUNET_DIR)" ]; then \
+		echo "Cloning lunet $(LUNET_VERSION)..."; \
+		git clone --branch $(LUNET_VERSION) --depth 1 $(LUNET_REPO) $(LUNET_DIR); \
+	fi
+	@echo "Copying app/ to lunet/.tmp/app_embed/ (sandbox-safe)..."
+	@rm -rf $(LUNET_DIR)/.tmp/app_embed && mkdir -p $(LUNET_DIR)/.tmp/app_embed
+	@cp -r app/* $(LUNET_DIR)/.tmp/app_embed/
+	@cd $(LUNET_DIR) && \
+	 xmake f -c -m release --lunet_trace=n --lunet_verbose_trace=n --lunet_embed_scripts=y --lunet_embed_scripts_dir=.tmp/app_embed -y && \
+	 xmake build lunet-bin && \
+	 xmake build lunet-sqlite3
+	@mkdir -p dist
+	@LUNET_DIST_BIN=$$(find $(LUNET_DIR)/build -path '*/release/lunet-run' -type f | head -1); \
+	 SQLITE_SO=$$(find $(LUNET_DIR)/build -name 'sqlite3.so' -type f | head -1); \
+	 cp "$$LUNET_DIST_BIN" dist/lunet-conduit; \
+	 mkdir -p dist/lunet; \
+	 cp "$$SQLITE_SO" dist/lunet/sqlite3.so; \
+	 cp -r www dist/
+	@echo "Distribution build complete: dist/lunet-conduit"
+	@echo "SQLite driver: dist/lunet/sqlite3.so"
+	@echo "Static files: dist/www/"
 
 # Initialize SQLite database
 init:
@@ -149,6 +174,30 @@ test:
 		echo ""; \
 	fi
 
+# Test distribution binary with embedded scripts
+test-dist: build-dist init
+	@echo "Testing distribution binary with embedded scripts..."
+	@mkdir -p .tmp/test-dist
+	@cp dist/lunet-conduit .tmp/test-dist/
+	@cp -r dist/lunet .tmp/test-dist/
+	@cp -r dist/www .tmp/test-dist/
+	@mkdir -p .tmp/test-dist/.tmp
+	@cp $(DB_PATH) .tmp/test-dist/.tmp/conduit.sqlite3
+	@echo "Running from isolated directory: .tmp/test-dist"
+	@cd .tmp/test-dist && \
+		LUNET_LISTEN="tcp://127.0.0.1:8081" \
+		LUA_CPATH="./lunet/?.so;;" \
+		DB_PATH=.tmp/conduit.sqlite3 \
+		./lunet-conduit main.lua & echo $$! > .tmp/test-dist.pid
+	@sleep 2
+	@echo "Checking if scripts were extracted from embedded binary..."
+	@curl -s --max-time 3 http://127.0.0.1:8081/api/tags > /dev/null && echo "✓ API responding" || (echo "✗ API not responding"; kill $$(cat .tmp/test-dist.pid) 2>/dev/null; exit 1)
+	@curl -s --max-time 3 http://127.0.0.1:8081/api/articles > /dev/null && echo "✓ Articles endpoint working" || (echo "✗ Articles endpoint failed"; kill $$(cat .tmp/test-dist.pid) 2>/dev/null; exit 1)
+	@echo "✓ Distribution binary test passed!"
+	@kill $$(cat .tmp/test-dist.pid) 2>/dev/null || true
+	@rm -f .tmp/test-dist.pid
+	@echo "Note: Check lunet startup logs to confirm embedded script extraction"
+
 # Quick smoke test (server must be running)
 smoke:
 	@echo "Testing server endpoints..."
@@ -194,6 +243,8 @@ clean-all: clean
 	cd $(LUNET_DIR) && xmake clean 2>/dev/null || true
 	@echo "Removing cloned lunet directory..."
 	rm -rf $(LUNET_DIR)
+	@echo "Removing distribution directory..."
+	rm -rf dist/
 	@echo "Cleaned all build artifacts"
 
 # Show help
@@ -205,6 +256,7 @@ help:
 	@echo ""
 	@echo "Usage:"
 	@echo "  make build        - Build lunet v$(LUNET_VERSION) (clones if needed)"
+	@echo "  make build-dist   - Build distribution binary with embedded scripts"
 	@echo "  make init         - Initialize SQLite database"
 	@echo "  make run          - Start server (port 8080, background)"
 	@echo "  make dev          - Start server in foreground (development)"
@@ -213,12 +265,13 @@ help:
 	@echo "  make run-postgres - Start with PostgreSQL backend"
 	@echo "  make stop         - Stop background server"
 	@echo "  make test         - Run API integration tests"
+	@echo "  make test-dist    - Test distribution binary with embedded scripts"
 	@echo "  make smoke        - Quick smoke test"
 	@echo "  make bench        - Run memory benchmark"
 	@echo "  make stress       - Run stress test (50 requests)"
 	@echo "  make install-vendor - Download vendor libs (preact, htm, tailwind) with content-addressed filenames"
 	@echo "  make clean        - Clean temporary files"
-	@echo "  make clean-all    - Clean all including lunet build"
+	@echo "  make clean-all    - Clean all including lunet build and dist/"
 	@echo ""
 	@echo "Environment variables:"
 	@echo "  LUNET_LISTEN    - Listen address (default: tcp://127.0.0.1:8080)"
