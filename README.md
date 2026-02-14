@@ -48,12 +48,11 @@ cd lunet-realworld-linux-amd64
 ### Option 2: Build from Source
 
 ```bash
-# 1. Clone repositories
-git clone https://github.com/lua-lunet/lunet.git
+# 1. Clone this repository
 git clone https://github.com/lua-lunet/lunet-realworld-example-app.git
 cd lunet-realworld-example-app
 
-# 2. Build lunet and SQLite driver
+# 2. Build lunet (cloned automatically at v0.1.2)
 make build
 
 # 3. Start the server
