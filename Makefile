@@ -5,7 +5,7 @@
 # Lunet is cloned at build time per https://github.com/lua-lunet/lunet/blob/main/docs/XMAKE_INTEGRATION.md
 
 LUNET_DIR := lunet
-LUNET_VERSION := v0.1.2
+LUNET_VERSION := v0.2.1
 LUNET_REPO := https://github.com/lua-lunet/lunet.git
 LUNET_BIN := $(LUNET_DIR)/build/macosx/arm64/release/lunet-run
 
