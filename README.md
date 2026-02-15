@@ -1,7 +1,7 @@
 # Lunet RealWorld Example App
 
 [![CI](https://github.com/lua-lunet/lunet-realworld-example-app/actions/workflows/ci.yml/badge.svg)](https://github.com/lua-lunet/lunet-realworld-example-app/actions/workflows/ci.yml)
-[![Lunet](https://img.shields.io/badge/Lunet-v0.2.1-blue?logo=lua)](https://github.com/lua-lunet/lunet/releases/tag/v0.2.1)
+[![Lunet](https://img.shields.io/badge/Lunet-v0.2.2-blue?logo=lua)](https://github.com/lua-lunet/lunet/releases/tag/v0.2.2)
 
 A full-featured implementation of the [RealWorld "Conduit" API specification](https://realworld.io) using the [Lunet](https://github.com/lua-lunet/lunet) async I/O framework.
 

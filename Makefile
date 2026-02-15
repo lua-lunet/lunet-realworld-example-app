@@ -5,7 +5,7 @@
 # Lunet is cloned at build time per https://github.com/lua-lunet/lunet/blob/main/docs/XMAKE_INTEGRATION.md
 
 LUNET_DIR := lunet
-LUNET_VERSION := v0.2.1
+LUNET_VERSION := v0.2.2
 LUNET_REPO := https://github.com/lua-lunet/lunet.git
 LUNET_BIN := $(LUNET_DIR)/build/macosx/arm64/release/lunet-run
 
@@ -56,11 +56,18 @@ install-vendor:
 
 # Build lunet if needed (clones at LUNET_VERSION if not present)
 $(LUNET_BIN):
-	@echo "Building lunet v$(LUNET_VERSION)..."
+	@echo "Building lunet $(LUNET_VERSION)..."
 	@if [ ! -d "$(LUNET_DIR)" ]; then \
 		echo "Cloning lunet $(LUNET_VERSION)..."; \
 		git clone --branch $(LUNET_VERSION) --depth 1 $(LUNET_REPO) $(LUNET_DIR); \
 	fi
+	@cd $(LUNET_DIR) && \
+		CUR_TAG=$$(git describe --tags --exact-match 2>/dev/null || true); \
+		if [ "$$CUR_TAG" != "$(LUNET_VERSION)" ]; then \
+			echo "Switching lunet checkout to $(LUNET_VERSION) (was '$$CUR_TAG')"; \
+			git fetch --tags -q; \
+			git checkout -q $(LUNET_VERSION); \
+		fi
 	@cd $(LUNET_DIR) && \
 		xmake f -m release --lunet_trace=n --lunet_verbose_trace=n -y && \
 		xmake build && \
@@ -72,16 +79,27 @@ build: $(LUNET_BIN)
 
 # Build distribution binary with embedded scripts (for production/Docker)
 build-dist:
-	@echo "Building lunet v$(LUNET_VERSION) with embedded scripts..."
+	@echo "Building lunet $(LUNET_VERSION) with embedded scripts..."
 	@if [ ! -d "$(LUNET_DIR)" ]; then \
 		echo "Cloning lunet $(LUNET_VERSION)..."; \
 		git clone --branch $(LUNET_VERSION) --depth 1 $(LUNET_REPO) $(LUNET_DIR); \
 	fi
-	@echo "Copying app/ to lunet/.tmp/app_embed/ (sandbox-safe)..."
-	@rm -rf $(LUNET_DIR)/.tmp/app_embed && mkdir -p $(LUNET_DIR)/.tmp/app_embed
-	@cp -r app/* $(LUNET_DIR)/.tmp/app_embed/
 	@cd $(LUNET_DIR) && \
-	 xmake f -c -m release --lunet_trace=n --lunet_verbose_trace=n --lunet_embed_scripts=y --lunet_embed_scripts_dir=.tmp/app_embed -y && \
+		CUR_TAG=$$(git describe --tags --exact-match 2>/dev/null || true); \
+		if [ "$$CUR_TAG" != "$(LUNET_VERSION)" ]; then \
+			echo "Switching lunet checkout to $(LUNET_VERSION) (was '$$CUR_TAG')"; \
+			git fetch --tags -q; \
+			git checkout -q $(LUNET_VERSION); \
+		fi
+	@echo "Copying app/ to lunet/.tmp/embed_root/ (sandbox-safe)..."
+	@mkdir -p .tmp/trash
+	@if [ -d "$(LUNET_DIR)/.tmp/embed_root" ]; then \
+		mv "$(LUNET_DIR)/.tmp/embed_root" ".tmp/trash/lunet.embed_root.$$(date +%Y%m%d_%H%M%S)"; \
+	fi
+	@mkdir -p $(LUNET_DIR)/.tmp/embed_root/app
+	@cp -r app/* $(LUNET_DIR)/.tmp/embed_root/app/
+	@cd $(LUNET_DIR) && \
+	 xmake f -c -m release --lunet_trace=n --lunet_verbose_trace=n --lunet_embed_scripts=y --lunet_embed_scripts_dir=.tmp/embed_root -y && \
 	 xmake build lunet-bin && \
 	 xmake build lunet-sqlite3
 	@mkdir -p dist
@@ -177,26 +195,50 @@ test:
 # Test distribution binary with embedded scripts
 test-dist: build-dist init
 	@echo "Testing distribution binary with embedded scripts..."
-	@mkdir -p .tmp/test-dist
-	@cp dist/lunet-conduit .tmp/test-dist/
-	@cp -r dist/lunet .tmp/test-dist/
-	@cp -r dist/www .tmp/test-dist/
-	@mkdir -p .tmp/test-dist/.tmp
-	@cp $(DB_PATH) .tmp/test-dist/.tmp/conduit.sqlite3
-	@echo "Running from isolated directory: .tmp/test-dist"
-	@cd .tmp/test-dist && \
-		LUNET_LISTEN="tcp://127.0.0.1:8081" \
+	@echo "Verifying embedded probe script runs from extracted temp dir..."
+	@PROBE_SRC=$$(./dist/lunet-conduit app/embed_probe.lua 2>/dev/null | head -1); \
+		echo "Probe source: $$PROBE_SRC"; \
+		case "$$PROBE_SRC" in \
+			@*/lunet-*/app/embed_probe.lua) echo "✓ Probe script executed from extracted directory" ;; \
+			*) echo "✗ Unexpected probe source (expected @*/lunet-*/app/embed_probe.lua)"; exit 1 ;; \
+		esac
+	@mkdir -p .tmp/trash
+	@if [ -d "dist/run-test" ]; then \
+		mv "dist/run-test" ".tmp/trash/run-test.$$(date +%Y%m%d_%H%M%S)"; \
+	fi
+	@mkdir -p dist/run-test
+	@cp dist/lunet-conduit dist/run-test/
+	@cp -r dist/lunet dist/run-test/
+	@cp -r dist/www dist/run-test/
+	@mkdir -p dist/run-test/data
+	@cp $(DB_PATH) dist/run-test/data/conduit.sqlite3
+	@echo "Running from isolated directory: dist/run-test"
+	@test ! -f dist/run-test/app/main.lua
+	@cd dist/run-test && \
+		PORT=$$(for p in 18081 18082 18083 18084 18085; do \
+			curl -s --max-time 1 http://127.0.0.1:$$p/api/tags >/dev/null 2>&1 || { echo $$p; break; }; \
+			done); \
+		[ -n "$$PORT" ] || exit 1; \
+		echo "$$PORT" > .tmp.listen_port; \
+		LUNET_LISTEN="tcp://127.0.0.1:$$PORT" \
 		LUA_CPATH="./lunet/?.so;;" \
-		DB_PATH=.tmp/conduit.sqlite3 \
-		./lunet-conduit main.lua & echo $$! > .tmp/test-dist.pid
+		DB_PATH=data/conduit.sqlite3 \
+		./lunet-conduit app/main.lua >.tmp.server.stdout.log 2>.tmp.server.stderr.log & echo $$! > .tmp.server.pid
 	@sleep 2
+	@PID=$$(cat dist/run-test/.tmp.server.pid 2>/dev/null || true); \
+		[ -n "$$PID" ] && kill -0 $$PID 2>/dev/null && echo "✓ Server running (PID $$PID)" || (echo "✗ Server not running"; echo "stderr:"; cat dist/run-test/.tmp.server.stderr.log || true; exit 1)
 	@echo "Checking if scripts were extracted from embedded binary..."
-	@curl -s --max-time 3 http://127.0.0.1:8081/api/tags > /dev/null && echo "✓ API responding" || (echo "✗ API not responding"; kill $$(cat .tmp/test-dist.pid) 2>/dev/null; exit 1)
-	@curl -s --max-time 3 http://127.0.0.1:8081/api/articles > /dev/null && echo "✓ Articles endpoint working" || (echo "✗ Articles endpoint failed"; kill $$(cat .tmp/test-dist.pid) 2>/dev/null; exit 1)
+	@PORT=$$(cat dist/run-test/.tmp.listen_port 2>/dev/null || true); \
+		[ -n "$$PORT" ] || (echo "✗ Missing listen port file"; exit 1); \
+		curl -s --max-time 3 http://127.0.0.1:$$PORT/api/tags > /dev/null && echo "✓ API responding" || (echo "✗ API not responding"; kill $$(cat dist/run-test/.tmp.server.pid) 2>/dev/null; exit 1)
+	@PORT=$$(cat dist/run-test/.tmp.listen_port 2>/dev/null || true); \
+		[ -n "$$PORT" ] || (echo "✗ Missing listen port file"; exit 1); \
+		curl -s --max-time 3 http://127.0.0.1:$$PORT/api/articles > /dev/null && echo "✓ Articles endpoint working" || (echo "✗ Articles endpoint failed"; kill $$(cat dist/run-test/.tmp.server.pid) 2>/dev/null; exit 1)
 	@echo "✓ Distribution binary test passed!"
-	@kill $$(cat .tmp/test-dist.pid) 2>/dev/null || true
-	@rm -f .tmp/test-dist.pid
-	@echo "Note: Check lunet startup logs to confirm embedded script extraction"
+	@PID=$$(cat dist/run-test/.tmp.server.pid 2>/dev/null || true); \
+		[ -n "$$PID" ] && kill $$PID 2>/dev/null || true
+	@rm -f dist/run-test/.tmp.server.pid dist/run-test/.tmp.listen_port 2>/dev/null || true
+	@echo "Logs: dist/run-test/.tmp.server.stderr.log"
 
 # Quick smoke test (server must be running)
 smoke:
@@ -242,9 +284,15 @@ clean-all: clean
 	@echo "Cleaning all build artifacts..."
 	cd $(LUNET_DIR) && xmake clean 2>/dev/null || true
 	@echo "Removing cloned lunet directory..."
-	rm -rf $(LUNET_DIR)
+	@mkdir -p .tmp/trash
+	@if [ -d "$(LUNET_DIR)" ]; then \
+		mv "$(LUNET_DIR)" ".tmp/trash/lunet.$$(date +%Y%m%d_%H%M%S)"; \
+	fi
 	@echo "Removing distribution directory..."
-	rm -rf dist/
+	@mkdir -p .tmp/trash
+	@if [ -d "dist" ]; then \
+		mv "dist" ".tmp/trash/dist.$$(date +%Y%m%d_%H%M%S)"; \
+	fi
 	@echo "Cleaned all build artifacts"
 
 # Show help
