@@ -7,6 +7,7 @@
 3. **NO DATA LOSS:** Never use `rm -rf`. Move to `.tmp/` instead: `mv xxx .tmp/xxx.$(date +%Y%m%d_%H%M%S)`
 4. **TIMEOUTS:** All commands interacting with the server must have a timeout (`curl --max-time 3`).
 5. **SECURE BINDING:** Default is `127.0.0.1`. Never bind to `0.0.0.0` unless user explicitly requests it.
+6. **SANDBOX ISOLATION:** Never use relative paths that escape this repository's sandbox (e.g., `../lunet` or `$(cd ../foo && pwd)`). All paths must stay within this repo or use absolute paths that were explicitly provided by the build system.
 
 ## Project Overview
 

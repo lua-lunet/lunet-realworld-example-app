@@ -5,7 +5,7 @@
 # Lunet is cloned at build time per https://github.com/lua-lunet/lunet/blob/main/docs/XMAKE_INTEGRATION.md
 
 LUNET_DIR := lunet
-LUNET_VERSION := v0.1.2
+LUNET_VERSION := v0.2.2
 LUNET_REPO := https://github.com/lua-lunet/lunet.git
 LUNET_BIN := $(LUNET_DIR)/build/macosx/arm64/release/lunet-run
 
@@ -19,7 +19,7 @@ TIMEOUT := 10
 # Detect timeout command (GNU coreutils vs BSD)
 TIMEOUT_CMD := $(shell command -v gtimeout 2>/dev/null || command -v timeout 2>/dev/null || echo "")
 
-.PHONY: all build run run-debug run-mysql run-postgres stop test bench clean clean-all help init dev install-vendor
+.PHONY: all build build-dist run run-debug run-mysql run-postgres stop test test-dist bench clean clean-all help init dev install-vendor
 
 all: help
 
@@ -56,11 +56,18 @@ install-vendor:
 
 # Build lunet if needed (clones at LUNET_VERSION if not present)
 $(LUNET_BIN):
-	@echo "Building lunet v$(LUNET_VERSION)..."
+	@echo "Building lunet $(LUNET_VERSION)..."
 	@if [ ! -d "$(LUNET_DIR)" ]; then \
 		echo "Cloning lunet $(LUNET_VERSION)..."; \
 		git clone --branch $(LUNET_VERSION) --depth 1 $(LUNET_REPO) $(LUNET_DIR); \
 	fi
+	@cd $(LUNET_DIR) && \
+		CUR_TAG=$$(git describe --tags --exact-match 2>/dev/null || true); \
+		if [ "$$CUR_TAG" != "$(LUNET_VERSION)" ]; then \
+			echo "Switching lunet checkout to $(LUNET_VERSION) (was '$$CUR_TAG')"; \
+			git fetch --tags -q; \
+			git checkout -q $(LUNET_VERSION); \
+		fi
 	@cd $(LUNET_DIR) && \
 		xmake f -m release --lunet_trace=n --lunet_verbose_trace=n -y && \
 		xmake build && \
@@ -69,6 +76,42 @@ $(LUNET_BIN):
 build: $(LUNET_BIN)
 	@echo "Build complete. Lunet binary: $(LUNET_BIN)"
 	@echo "SQLite driver: $$(find $(LUNET_DIR)/build -name 'sqlite3.so' -type f | head -1)"
+
+# Build distribution binary with embedded scripts (for production/Docker)
+build-dist:
+	@echo "Building lunet $(LUNET_VERSION) with embedded scripts..."
+	@if [ ! -d "$(LUNET_DIR)" ]; then \
+		echo "Cloning lunet $(LUNET_VERSION)..."; \
+		git clone --branch $(LUNET_VERSION) --depth 1 $(LUNET_REPO) $(LUNET_DIR); \
+	fi
+	@cd $(LUNET_DIR) && \
+		CUR_TAG=$$(git describe --tags --exact-match 2>/dev/null || true); \
+		if [ "$$CUR_TAG" != "$(LUNET_VERSION)" ]; then \
+			echo "Switching lunet checkout to $(LUNET_VERSION) (was '$$CUR_TAG')"; \
+			git fetch --tags -q; \
+			git checkout -q $(LUNET_VERSION); \
+		fi
+	@echo "Copying app/ to lunet/.tmp/embed_root/ (sandbox-safe)..."
+	@mkdir -p .tmp/trash
+	@if [ -d "$(LUNET_DIR)/.tmp/embed_root" ]; then \
+		mv "$(LUNET_DIR)/.tmp/embed_root" ".tmp/trash/lunet.embed_root.$$(date +%Y%m%d_%H%M%S)"; \
+	fi
+	@mkdir -p $(LUNET_DIR)/.tmp/embed_root/app
+	@cp -r app/* $(LUNET_DIR)/.tmp/embed_root/app/
+	@cd $(LUNET_DIR) && \
+	 xmake f -c -m release --lunet_trace=n --lunet_verbose_trace=n --lunet_embed_scripts=y --lunet_embed_scripts_dir=.tmp/embed_root -y && \
+	 xmake build lunet-bin && \
+	 xmake build lunet-sqlite3
+	@mkdir -p dist
+	@LUNET_DIST_BIN=$$(find $(LUNET_DIR)/build -path '*/release/lunet-run' -type f | head -1); \
+	 SQLITE_SO=$$(find $(LUNET_DIR)/build -name 'sqlite3.so' -type f | head -1); \
+	 cp "$$LUNET_DIST_BIN" dist/lunet-conduit; \
+	 mkdir -p dist/lunet; \
+	 cp "$$SQLITE_SO" dist/lunet/sqlite3.so; \
+	 cp -r www dist/
+	@echo "Distribution build complete: dist/lunet-conduit"
+	@echo "SQLite driver: dist/lunet/sqlite3.so"
+	@echo "Static files: dist/www/"
 
 # Initialize SQLite database
 init:
@@ -149,6 +192,54 @@ test:
 		echo ""; \
 	fi
 
+# Test distribution binary with embedded scripts
+test-dist: build-dist init
+	@echo "Testing distribution binary with embedded scripts..."
+	@echo "Verifying embedded probe script runs from extracted temp dir..."
+	@PROBE_SRC=$$(./dist/lunet-conduit app/embed_probe.lua 2>/dev/null | head -1); \
+		echo "Probe source: $$PROBE_SRC"; \
+		case "$$PROBE_SRC" in \
+			@*/lunet-*/app/embed_probe.lua) echo "✓ Probe script executed from extracted directory" ;; \
+			*) echo "✗ Unexpected probe source (expected @*/lunet-*/app/embed_probe.lua)"; exit 1 ;; \
+		esac
+	@mkdir -p .tmp/trash
+	@if [ -d "dist/run-test" ]; then \
+		mv "dist/run-test" ".tmp/trash/run-test.$$(date +%Y%m%d_%H%M%S)"; \
+	fi
+	@mkdir -p dist/run-test
+	@cp dist/lunet-conduit dist/run-test/
+	@cp -r dist/lunet dist/run-test/
+	@cp -r dist/www dist/run-test/
+	@mkdir -p dist/run-test/data
+	@cp $(DB_PATH) dist/run-test/data/conduit.sqlite3
+	@echo "Running from isolated directory: dist/run-test"
+	@test ! -f dist/run-test/app/main.lua
+	@cd dist/run-test && \
+		PORT=$$(for p in 18081 18082 18083 18084 18085; do \
+			curl -s --max-time 1 http://127.0.0.1:$$p/api/tags >/dev/null 2>&1 || { echo $$p; break; }; \
+			done); \
+		[ -n "$$PORT" ] || exit 1; \
+		echo "$$PORT" > .tmp.listen_port; \
+		LUNET_LISTEN="tcp://127.0.0.1:$$PORT" \
+		LUA_CPATH="./lunet/?.so;;" \
+		DB_PATH=data/conduit.sqlite3 \
+		./lunet-conduit app/main.lua >.tmp.server.stdout.log 2>.tmp.server.stderr.log & echo $$! > .tmp.server.pid
+	@sleep 2
+	@PID=$$(cat dist/run-test/.tmp.server.pid 2>/dev/null || true); \
+		[ -n "$$PID" ] && kill -0 $$PID 2>/dev/null && echo "✓ Server running (PID $$PID)" || (echo "✗ Server not running"; echo "stderr:"; cat dist/run-test/.tmp.server.stderr.log || true; exit 1)
+	@echo "Checking if scripts were extracted from embedded binary..."
+	@PORT=$$(cat dist/run-test/.tmp.listen_port 2>/dev/null || true); \
+		[ -n "$$PORT" ] || (echo "✗ Missing listen port file"; exit 1); \
+		curl -s --max-time 3 http://127.0.0.1:$$PORT/api/tags > /dev/null && echo "✓ API responding" || (echo "✗ API not responding"; kill $$(cat dist/run-test/.tmp.server.pid) 2>/dev/null; exit 1)
+	@PORT=$$(cat dist/run-test/.tmp.listen_port 2>/dev/null || true); \
+		[ -n "$$PORT" ] || (echo "✗ Missing listen port file"; exit 1); \
+		curl -s --max-time 3 http://127.0.0.1:$$PORT/api/articles > /dev/null && echo "✓ Articles endpoint working" || (echo "✗ Articles endpoint failed"; kill $$(cat dist/run-test/.tmp.server.pid) 2>/dev/null; exit 1)
+	@echo "✓ Distribution binary test passed!"
+	@PID=$$(cat dist/run-test/.tmp.server.pid 2>/dev/null || true); \
+		[ -n "$$PID" ] && kill $$PID 2>/dev/null || true
+	@rm -f dist/run-test/.tmp.server.pid dist/run-test/.tmp.listen_port 2>/dev/null || true
+	@echo "Logs: dist/run-test/.tmp.server.stderr.log"
+
 # Quick smoke test (server must be running)
 smoke:
 	@echo "Testing server endpoints..."
@@ -193,7 +284,15 @@ clean-all: clean
 	@echo "Cleaning all build artifacts..."
 	cd $(LUNET_DIR) && xmake clean 2>/dev/null || true
 	@echo "Removing cloned lunet directory..."
-	rm -rf $(LUNET_DIR)
+	@mkdir -p .tmp/trash
+	@if [ -d "$(LUNET_DIR)" ]; then \
+		mv "$(LUNET_DIR)" ".tmp/trash/lunet.$$(date +%Y%m%d_%H%M%S)"; \
+	fi
+	@echo "Removing distribution directory..."
+	@mkdir -p .tmp/trash
+	@if [ -d "dist" ]; then \
+		mv "dist" ".tmp/trash/dist.$$(date +%Y%m%d_%H%M%S)"; \
+	fi
 	@echo "Cleaned all build artifacts"
 
 # Show help
@@ -205,6 +304,7 @@ help:
 	@echo ""
 	@echo "Usage:"
 	@echo "  make build        - Build lunet v$(LUNET_VERSION) (clones if needed)"
+	@echo "  make build-dist   - Build distribution binary with embedded scripts"
 	@echo "  make init         - Initialize SQLite database"
 	@echo "  make run          - Start server (port 8080, background)"
 	@echo "  make dev          - Start server in foreground (development)"
@@ -213,12 +313,13 @@ help:
 	@echo "  make run-postgres - Start with PostgreSQL backend"
 	@echo "  make stop         - Stop background server"
 	@echo "  make test         - Run API integration tests"
+	@echo "  make test-dist    - Test distribution binary with embedded scripts"
 	@echo "  make smoke        - Quick smoke test"
 	@echo "  make bench        - Run memory benchmark"
 	@echo "  make stress       - Run stress test (50 requests)"
 	@echo "  make install-vendor - Download vendor libs (preact, htm, tailwind) with content-addressed filenames"
 	@echo "  make clean        - Clean temporary files"
-	@echo "  make clean-all    - Clean all including lunet build"
+	@echo "  make clean-all    - Clean all including lunet build and dist/"
 	@echo ""
 	@echo "Environment variables:"
 	@echo "  LUNET_LISTEN    - Listen address (default: tcp://127.0.0.1:8080)"
